@@ -1,0 +1,56 @@
+name: "Dijidemi Login Test"
+description: "Dijidemi platformuna giriş yapıp deneme arama testi"
+browser: chromium
+headless: true
+timeout: 30000
+retry_count: 2
+tags:
+  - login
+  - search
+  - critical
+
+steps:
+  - goto: "https://dijidemi.com/Login"
+  
+  - fill:
+      label: "Kullanıcı adı"
+      value: "otomasyonogretmen"
+  
+  - fill:
+      label: "Şifre"
+      value: "123456"
+  
+  - click:
+      text: "Giriş Yap"
+  
+  - assert_url_not_contains: "Login"
+  
+  - screenshot:
+      name: "login_success"
+      full_page: false
+  
+  - click:
+      text: "Denemeler"
+  
+  - wait:
+      seconds: 2
+  
+  - select:
+      label: "Tarih"
+      option: "Tümü"
+  
+  - fill:
+      placeholder: "Deneme ara"
+      value: "TYT ULTİ TÜRKİYE GENELİ DENEME 2023-2024 Silmeyiniz"
+  
+  - click:
+      text: "Sınav listesi"
+  
+  - wait:
+      seconds: 3
+  
+  - screenshot:
+      name: "search_results"
+      full_page: true
+  
+  - assert_url_contains: "Denemeler" 
