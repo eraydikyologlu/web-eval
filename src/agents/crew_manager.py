@@ -131,7 +131,7 @@ class CrewManager:
             "timeout": scenario_data.get("timeout", 30000)
         }
         
-        init_result = self.executor.initialize_browser_tool(browser_config)
+        init_result = await self.executor.initialize_browser_tool(browser_config)
         if init_result["status"] != "success":
             return {"status": "browser_init_failed", "error": init_result["message"]}
         
@@ -146,7 +146,7 @@ class CrewManager:
                 self.logger.info("Step çalıştırılıyor", step_index=i, step=step)
                 
                 # Step'i çalıştır
-                step_result = self.executor.execute_step_tool(step, i)
+                step_result = await self.executor.execute_step_tool(step, i)
                 step_result["duration"] = (datetime.now() - step_start).total_seconds()
                 total_duration += step_result["duration"]
                 
@@ -174,7 +174,7 @@ class CrewManager:
                 })
         
         # Browser'ı kapat
-        self.executor.close_browser_tool()
+        await self.executor.close_browser_tool()
         
         return {
             "status": "completed",
@@ -249,7 +249,7 @@ class CrewManager:
             for attempt in range(recovery_plan.get("max_attempts", 2)):
                 self.logger.info("Recovery attempt", attempt=attempt + 1)
                 
-                retry_result = self.executor.execute_step_tool(failed_step, step_result["step_index"])
+                retry_result = await self.executor.execute_step_tool(failed_step, step_result["step_index"])
                 
                 if retry_result["status"] == "success":
                     return {

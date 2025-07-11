@@ -1,7 +1,6 @@
 # Web Test Automation Stack
 # Core browser automation
 playwright==1.41.0
-browser-use==0.1.5
 
 # AI/LLM integration
 crewai==0.28.8

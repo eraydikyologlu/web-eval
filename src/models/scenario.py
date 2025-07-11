@@ -30,6 +30,9 @@ class Step(BaseModel):
     # Screenshot action
     screenshot: Optional[Dict[str, Any]] = Field(None, description="Ekran görüntüsü")
     
+    # Download action
+    expect_download: Optional[Dict[str, Any]] = Field(None, description="Download bekleme")
+    
     # Meta bilgi
     description: Optional[str] = Field(None, description="Step açıklaması")
     
@@ -39,7 +42,7 @@ class Step(BaseModel):
         actions = [
             self.goto, self.fill, self.click, self.select,
             self.assert_url_not_contains, self.assert_url_contains,
-            self.wait, self.screenshot
+            self.wait, self.screenshot, self.expect_download
         ]
         
         active_actions = [action for action in actions if action is not None]
@@ -70,6 +73,8 @@ class Step(BaseModel):
             return "wait"
         elif self.screenshot is not None:
             return "screenshot"
+        elif self.expect_download is not None:
+            return "expect_download"
         else:
             raise ValueError("Geçersiz action türü")
     

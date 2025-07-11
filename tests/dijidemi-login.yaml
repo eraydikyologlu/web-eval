@@ -1,7 +1,7 @@
 name: "Dijidemi Login Test"
 description: "Dijidemi platformuna giriş yapıp deneme arama testi"
 browser: chromium
-headless: true
+headless: false
 timeout: 30000
 retry_count: 2
 tags:
@@ -13,15 +13,18 @@ steps:
   - goto: "https://dijidemi.com/Login"
   
   - fill:
-      label: "Kullanıcı adı"
+      selector: "#txtUserName"
       value: "otomasyonogretmen"
   
   - fill:
-      label: "Şifre"
+      selector: "#txtPassword"
       value: "123456"
   
   - click:
-      text: "Giriş Yap"
+      selector: "#btnLogin"
+  
+  - wait:
+      seconds: 3
   
   - assert_url_not_contains: "Login"
   
@@ -33,24 +36,40 @@ steps:
       text: "Denemeler"
   
   - wait:
-      seconds: 2
+      seconds: 5
   
   - select:
-      label: "Tarih"
+      selector: "#drTarih"
       option: "Tümü"
+
+  - wait:
+      seconds: 5
   
   - fill:
-      placeholder: "Deneme ara"
+      selector: "#search_tb"
       value: "TYT ULTİ TÜRKİYE GENELİ DENEME 2023-2024 Silmeyiniz"
   
+  - wait:
+      seconds: 2
+  
   - click:
-      text: "Sınav listesi"
+      selector: "button.btn.btn-relief-dark.waves-effect.waves-light"
   
   - wait:
-      seconds: 3
+      seconds: 5
   
   - screenshot:
       name: "search_results"
       full_page: true
   
-  - assert_url_contains: "Denemeler" 
+  - assert_url_contains: "Denemeler"
+  
+  - expect_download:
+      trigger_text: "Liste Raporu"
+  
+  - wait:
+      seconds: 5
+  
+  - screenshot:
+      name: "download_completed"
+      full_page: false 
