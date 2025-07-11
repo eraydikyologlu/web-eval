@@ -1,0 +1,70 @@
+name: "Dijidemi Smart AI Test"
+description: "LLM ile akıllı element seçimi kullanan dijidemi login ve arama testi"
+browser: chromium
+headless: false
+timeout: 30000
+retry_count: 2
+tags:
+  - smart
+  - ai
+  - dijidemi
+  - critical
+
+steps:
+  - goto: "https://dijidemi.com/Login"
+  
+  - smart_fill:
+      task: "kullanıcı adını gir"
+      value: "otomasyonogretmen"
+  
+  - smart_fill:
+      task: "şifre gir"
+      value: "123456"
+  
+  - smart_click:
+      task: "giriş butonuna tıkla"
+  
+  - wait:
+      seconds: 3
+  
+  - assert_url_not_contains: "Login"
+  
+  - screenshot:
+      name: "smart_login_success"
+      full_page: false
+  
+  - smart_click:
+      task: "Denemeler menüsüne tıkla"
+  
+  - wait:
+      seconds: 2
+      
+  - smart_fill:
+      task: "tarih filtresini seç"
+      value: "Tümü"
+  
+  - smart_fill:
+      task: "deneme arama kutusuna yaz"
+      value: "TYT ULTİ TÜRKİYE GENELİ DENEME 2023-2024 Silmeyiniz"
+  
+  - smart_click:
+      task: "arama butonuna bas"
+  
+  - wait:
+      seconds: 3
+  
+  - screenshot:
+      name: "smart_search_results"
+      full_page: true
+  
+  - assert_url_contains: "Denemeler"
+  
+  - smart_click:
+      task: "Liste Raporu indirme butonuna tıkla"
+  
+  - wait:
+      seconds: 5
+  
+  - screenshot:
+      name: "smart_download_completed"
+      full_page: false 

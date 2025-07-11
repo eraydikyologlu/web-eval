@@ -33,6 +33,10 @@ class Step(BaseModel):
     # Download action
     expect_download: Optional[Dict[str, Any]] = Field(None, description="Download bekleme")
     
+    # Smart AI actions
+    smart_fill: Optional[Dict[str, Any]] = Field(None, description="LLM ile akıllı form doldurma")
+    smart_click: Optional[Dict[str, Any]] = Field(None, description="LLM ile akıllı tıklama")
+    
     # Meta bilgi
     description: Optional[str] = Field(None, description="Step açıklaması")
     
@@ -42,7 +46,8 @@ class Step(BaseModel):
         actions = [
             self.goto, self.fill, self.click, self.select,
             self.assert_url_not_contains, self.assert_url_contains,
-            self.wait, self.screenshot, self.expect_download
+            self.wait, self.screenshot, self.expect_download,
+            self.smart_fill, self.smart_click
         ]
         
         active_actions = [action for action in actions if action is not None]
@@ -75,6 +80,10 @@ class Step(BaseModel):
             return "screenshot"
         elif self.expect_download is not None:
             return "expect_download"
+        elif self.smart_fill is not None:
+            return "smart_fill"
+        elif self.smart_click is not None:
+            return "smart_click"
         else:
             raise ValueError("Geçersiz action türü")
     

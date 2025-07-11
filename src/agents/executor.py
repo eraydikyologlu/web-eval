@@ -8,10 +8,15 @@ import structlog
 import asyncio
 from pathlib import Path
 import os
+import json
 from datetime import datetime
 
 # Playwright imports
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page, TimeoutError as PlaywrightTimeoutError
+
+# OpenAI imports  
+import openai
+from src.utils.config import Config
 
 logger = structlog.get_logger(__name__)
 
@@ -35,6 +40,10 @@ class ExecutorAgent:
         self.browser = None
         self.context = None
         self.page = None
+        
+        # OpenAI setup
+        self.config = Config()
+        openai.api_key = self.config.openai_api_key
     
     async def initialize_browser_tool(self, browser_config: Dict[str, Any]) -> Dict[str, str]:
         """
@@ -144,6 +153,14 @@ class ExecutorAgent:
                 
             elif "expect_download" in step_data:
                 result.update(await self._execute_expect_download(step_data["expect_download"]))
+                
+            elif "smart_fill" in step_data:
+                fill_config = step_data["smart_fill"]
+                result.update(await self.smart_fill_tool(fill_config["task"], fill_config["value"]))
+                
+            elif "smart_click" in step_data:
+                click_config = step_data["smart_click"]
+                result.update(await self.smart_click_tool(click_config["task"]))
                 
             else:
                 raise ValueError(f"Desteklenmeyen step türü: {step_data}")
@@ -483,7 +500,309 @@ class ExecutorAgent:
                 "status": "error",
                 "message": f"JavaScript çalıştırılamadı: {str(e)}"
             }
+
+    async def analyze_page_elements_tool(self) -> Dict[str, Any]:
+        """
+        Sayfadaki tüm interaktif elementleri analiz eder ve döndürür
+        
+        Returns:
+            Sayfa elementlerinin listesi
+        """
+        try:
+            if not self.page:
+                return {
+                    "status": "error",
+                    "message": "Browser page mevcut değil"
+                }
+            
+            # Tüm interaktif elementleri topla
+            elements_script = """
+            () => {
+                const elements = [];
+                
+                // Tüm clickable/fillable elementleri seç
+                const selectors = [
+                    'button', 'input[type="button"]', 'input[type="submit"]', 
+                    'a[href]', '[onclick]', '.btn', '[role="button"]',
+                    'input[type="text"]', 'input[type="email"]', 'input[type="password"]',
+                    'input[type="search"]', 'textarea', 'select', 'input[type="checkbox"]',
+                    'input[type="radio"]', '[contenteditable]'
+                ];
+                
+                selectors.forEach(selector => {
+                    document.querySelectorAll(selector).forEach((el, index) => {
+                        if (el.offsetParent !== null) { // Görünür elementler
+                            const rect = el.getBoundingClientRect();
+                            
+                            elements.push({
+                                index: elements.length,
+                                tagName: el.tagName.toLowerCase(),
+                                type: el.type || 'no-type',
+                                id: el.id || '',
+                                className: el.className || '',
+                                name: el.name || '',
+                                placeholder: el.placeholder || '',
+                                title: el.title || '',
+                                ariaLabel: el.getAttribute('aria-label') || '',
+                                text: el.textContent?.trim().substring(0, 100) || '',
+                                value: el.value || '',
+                                href: el.href || '',
+                                onclick: el.getAttribute('onclick') || '',
+                                x: Math.round(rect.x),
+                                y: Math.round(rect.y),
+                                width: Math.round(rect.width),
+                                height: Math.round(rect.height),
+                                visible: rect.width > 0 && rect.height > 0,
+                                selector: el.tagName.toLowerCase() + 
+                                         (el.id ? '#' + el.id : '') +
+                                         (el.className ? '.' + el.className.split(' ').join('.') : '')
+                            });
+                        }
+                    });
+                });
+                
+                return elements.filter(el => el.visible);
+            }
+            """
+            
+            result = await self.page.evaluate(elements_script)
+            
+            self.logger.info("Sayfa elementleri analiz edildi", element_count=len(result))
+            
+            return {
+                "status": "success",
+                "elements": result,
+                "element_count": len(result)
+            }
+            
+        except Exception as e:
+            self.logger.error("Sayfa analizi hatası", error=str(e))
+            return {
+                "status": "error", 
+                "message": f"Sayfa analiz edilemedi: {str(e)}"
+            }
     
+    async def _select_element_with_llm(self, elements: list, task_description: str, action_type: str) -> Dict[str, Any]:
+        """
+        LLM kullanarak uygun elementi seçer
+        
+        Args:
+            elements: Sayfa elementleri listesi
+            task_description: Doğal dil görevi açıklaması
+            action_type: "fill" veya "click"
+            
+        Returns:
+            Seçilen element bilgisi
+        """
+        try:
+            # Elements listesini LLM için hazırla
+            elements_summary = []
+            for i, el in enumerate(elements):
+                summary = f"Element {i}: {el['tagName']}"
+                if el['id']: summary += f" id='{el['id']}'"
+                if el['className']: summary += f" class='{el['className'][:50]}'"
+                if el['placeholder']: summary += f" placeholder='{el['placeholder']}'"
+                if el['text']: summary += f" text='{el['text'][:50]}'"
+                if el['ariaLabel']: summary += f" aria-label='{el['ariaLabel']}'"
+                if el['name']: summary += f" name='{el['name']}'"
+                elements_summary.append(summary)
+            
+            # LLM prompt'u oluştur
+            prompt = f"""
+Aşağıdaki web sayfası elementlerinden "{task_description}" görevi için en uygun olanını seç.
+
+Elementler:
+{chr(10).join(elements_summary)}
+
+Görev türü: {action_type}
+Görev açıklaması: {task_description}
+
+Sadece element numarasını (0-{len(elements)-1} arası) döndür. 
+Eğer uygun element bulamazsan -1 döndür.
+
+Cevabın sadece sayı olsun:
+"""
+
+            # OpenAI API çağrısı
+            import requests
+            
+            headers = {
+                "Authorization": f"Bearer {openai.api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            data = {
+                "model": self.llm_model,
+                "messages": [
+                    {"role": "system", "content": "Sen web elementlerini analiz eden uzman bir asistansın. Sadece sayı döndür."},
+                    {"role": "user", "content": prompt}
+                ],
+                "max_tokens": 10,
+                "temperature": 0
+            }
+            
+            response = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers=headers,
+                json=data,
+                timeout=30
+            )
+            
+            if response.status_code != 200:
+                raise Exception(f"OpenAI API hatası: {response.status_code} - {response.text}")
+            
+            response_data = response.json()
+            
+            # Cevabı parse et
+            selected_index = int(response_data["choices"][0]["message"]["content"].strip())
+            
+            if selected_index == -1 or selected_index >= len(elements):
+                return {
+                    "status": "error",
+                    "message": f"Uygun element bulunamadı: {task_description}"
+                }
+            
+            selected_element = elements[selected_index]
+            
+            self.logger.info("LLM element seçimi yapıldı", 
+                           task=task_description,
+                           selected_index=selected_index,
+                           element_id=selected_element.get('id', ''),
+                           element_text=selected_element.get('text', '')[:50])
+            
+            return {
+                "status": "success",
+                "element": selected_element,
+                "index": selected_index
+            }
+            
+        except Exception as e:
+            self.logger.error("LLM element seçimi hatası", error=str(e))
+            return {
+                "status": "error",
+                "message": f"Element seçimi yapılamadı: {str(e)}"
+            }
+
+    async def smart_fill_tool(self, task_description: str, value: str) -> Dict[str, Any]:
+        """
+        LLM ile akıllı form doldurma
+        
+        Args:
+            task_description: "Kullanıcı adını gir" gibi doğal dil talimatı
+            value: Girilecek değer
+            
+        Returns:
+            Fill işlem sonucu
+        """
+        try:
+            # Sayfa elementlerini analiz et
+            elements_result = await self.analyze_page_elements_tool()
+            if elements_result["status"] != "success":
+                return elements_result
+            
+            elements = elements_result["elements"]
+            
+            # LLM ile uygun elementi seç
+            selection_result = await self._select_element_with_llm(elements, task_description, "fill")
+            if selection_result["status"] != "success":
+                return selection_result
+            
+            selected_element = selection_result["element"]
+            
+            # Elementi doldur
+            if selected_element['id']:
+                selector = f"#{selected_element['id']}"
+            elif selected_element['className']:
+                classes = selected_element['className'].split()[0]
+                selector = f".{classes}"
+            else:
+                selector = selected_element['tagName']
+            
+            # Select elementi mi kontrol et
+            if selected_element['tagName'].lower() == 'select':
+                # Dropdown seçimi yap
+                await self.page.select_option(selector, label=value)
+                self.logger.info("Smart select tamamlandı",
+                               task=task_description,
+                               selector=selector,
+                               value=value)
+            else:
+                # Normal input alanı doldur
+                await self.page.fill(selector, value)
+                self.logger.info("Smart fill tamamlandı",
+                               task=task_description,
+                               selector=selector,
+                               value=value)
+            
+            return {
+                "status": "success",
+                "action": "smart_fill",
+                "task": task_description,
+                "element": selected_element,
+                "value": value
+            }
+            
+        except Exception as e:
+            self.logger.error("Smart fill hatası", error=str(e))
+            return {
+                "status": "error",
+                "message": f"Smart fill başarısız: {str(e)}"
+            }
+
+    async def smart_click_tool(self, task_description: str) -> Dict[str, Any]:
+        """
+        LLM ile akıllı tıklama
+        
+        Args:
+            task_description: "Giriş butonuna tıkla" gibi doğal dil talimatı
+            
+        Returns:
+            Click işlem sonucu
+        """
+        try:
+            # Sayfa elementlerini analiz et
+            elements_result = await self.analyze_page_elements_tool()
+            if elements_result["status"] != "success":
+                return elements_result
+            
+            elements = elements_result["elements"]
+            
+            # LLM ile uygun elementi seç
+            selection_result = await self._select_element_with_llm(elements, task_description, "click")
+            if selection_result["status"] != "success":
+                return selection_result
+            
+            selected_element = selection_result["element"]
+            
+            # Elemente tıkla
+            if selected_element['id']:
+                selector = f"#{selected_element['id']}"
+            elif selected_element['className']:
+                classes = selected_element['className'].split()[0]
+                selector = f".{classes}"
+            else:
+                selector = selected_element['tagName']
+            
+            await self.page.click(selector)
+            
+            self.logger.info("Smart click tamamlandı",
+                           task=task_description,
+                           selector=selector)
+            
+            return {
+                "status": "success",
+                "action": "smart_click",
+                "task": task_description,
+                "element": selected_element
+            }
+            
+        except Exception as e:
+            self.logger.error("Smart click hatası", error=str(e))
+            return {
+                "status": "error",
+                "message": f"Smart click başarısız: {str(e)}"
+            }
+     
     async def _execute_expect_download(self, download_data: Dict[str, Any]) -> Dict[str, Any]:
         """Download bekleme action'ını çalıştırır"""
         self.logger.info("Download bekleniyor", download_data=download_data)
